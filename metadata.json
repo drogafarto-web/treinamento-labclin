@@ -1,0 +1,5 @@
+{
+  "name": "LabEdu RDC 978",
+  "description": "Sistema de Educação Continuada para Laboratórios Clínicos (LMS) em conformidade com a RDC 978/2025, utilizando arquitetura Supabase e preparado para IA.",
+  "requestFramePermissions": []
+}
