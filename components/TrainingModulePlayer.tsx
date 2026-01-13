@@ -49,7 +49,7 @@ export const TrainingModulePlayer: React.FC<TrainingModulePlayerProps> = ({ modu
         console.error("Erro no Player:", msg);
         
         if (msg.includes('recursion') || msg.includes('policy')) {
-            alert("⚠️ ERRO CRÍTICO (Recursão Infinita detectada)\n\nO banco de dados entrou em loop ao verificar permissões.\n\nSOLUÇÃO: Execute o script 'supabase_fix_lessons_rls.sql' no Supabase SQL Editor para corrigir as políticas RLS.");
+            alert("⚠️ ERRO CRÍTICO (Recursão Infinita detectada)\n\nO banco de dados entrou em loop ao verificar permissões.\n\nSOLUÇÃO: Execute o script 'supabase_fix_recursion.sql' no Supabase SQL Editor para corrigir as políticas RLS.");
         } else {
             alert(`Erro ao carregar conteúdo: ${msg}`);
         }

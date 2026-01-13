@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { supabase, checkConnection } from './lib/supabaseClient';
+import { supabase, checkConnection, setManualApiConfig } from './lib/supabaseClient';
 import { Employee, UserRole } from './types';
 import { Login } from './components/Login';
 import { ChangePassword } from './components/ChangePassword';
 import { SystemSetup } from './components/SystemSetup';
+import { SystemDiagnosis } from './components/SystemDiagnosis';
 
 import { Dashboard } from './components/Dashboard';
 import { TrainingMatrix } from './components/TrainingMatrix';
@@ -32,11 +33,14 @@ const App: React.FC = () => {
   const [connectionStatus, setConnectionStatus] = useState<{ok: boolean, message?: string}>({ ok: true });
   const [fatalError, setFatalError] = useState<string | null>(null);
   const [slowLoading, setSlowLoading] = useState(false);
+  const [showDiagnosis, setShowDiagnosis] = useState(false);
+  
+  // Estado para o input manual de chave API
+  const [manualKey, setManualKey] = useState('');
   
   const [isSetupMode, setIsSetupMode] = useState(false);
   const [currentPage, setCurrentPage] = useState<Page>(Page.DASHBOARD);
   
-  // Estado para armazenar os dados do certificado dinamicamente (null = fechado)
   const [certificateData, setCertificateData] = useState<any>(null);
   
   const loadingTimeoutRef = useRef<number | null>(null);
@@ -51,30 +55,6 @@ const App: React.FC = () => {
         setLoading(false);
         return;
     }
-
-    const initAuth = async () => {
-      try {
-        // TIMEOUT FORÇADO DE SEGURANÇA
-        // Reduzido para 5s para destravar mais rápido caso o banco esteja lento
-        loadingTimeoutRef.current = window.setTimeout(() => {
-          console.warn("⚠️ Carregamento demorou mais que o esperado. Liberando interface.");
-          setSlowLoading(true);
-          setLoading(false); 
-        }, 5000);
-
-        const { data: { session: existingSession } } = await supabase.auth.getSession();
-        
-        if (existingSession) {
-          setSession(existingSession);
-          await fetchUserProfile(existingSession.user.id);
-        } else {
-          setLoading(false);
-        }
-      } catch (e) {
-        console.error("Erro na inicialização:", e);
-        setLoading(false);
-      }
-    };
 
     initAuth();
 
@@ -94,13 +74,35 @@ const App: React.FC = () => {
     };
   }, []);
 
+  const initAuth = async () => {
+      try {
+        // TIMEOUT DE SEGURANÇA: Se o banco travar, libera o app em 5 segundos
+        loadingTimeoutRef.current = window.setTimeout(() => {
+          console.warn("⚠️ Timeout de segurança atingido. Forçando entrada.");
+          setSlowLoading(true);
+          setLoading(false); // Força a saída do estado de loading
+        }, 5000);
+
+        const { data: { session: existingSession } } = await supabase.auth.getSession();
+        
+        if (existingSession) {
+          setSession(existingSession);
+          await fetchUserProfile(existingSession.user.id);
+        } else {
+          setLoading(false);
+        }
+      } catch (e) {
+        console.error("Erro na inicialização:", e);
+        setLoading(false);
+      }
+    };
+
   const fetchUserProfile = async (userId: string) => {
-    setLoading(true);
+    // Não seta loading=true aqui para evitar piscar a tela se já estivermos no timeout
     setFatalError(null);
 
     try {
-      // Usamos maybeSingle para não lançar erro se o perfil ainda não existir (comum no primeiro login antes do setup)
-      // ATUALIZAÇÃO: Incluindo updated_at para verificar se a correção do banco funcionou
+      // Tenta buscar com timeout curto na query se possível, mas o JS client n tem timeout nativo fácil
       const { data, error } = await supabase
         .from('employees')
         .select('id, full_name, system_role, must_change_password, unit_id, updated_at')
@@ -110,30 +112,24 @@ const App: React.FC = () => {
       if (error) {
         const msg = getErrorMessage(error);
         
-        // DETECÇÃO DE LOOP / RECURSÃO (RLS)
         if (msg.includes('recursion') || msg.includes('policy')) {
           console.error("Erro Crítico de RLS:", msg);
-          setFatalError("Erro Crítico de Permissão (Loop Infinito). As políticas de segurança do banco precisam ser corrigidas.");
-          setLoading(false);
-          return;
+          setFatalError("Erro Crítico de Permissão (Loop Infinito). Execute 'supabase_fix_final.sql' no Supabase.");
+          // Não retorna, deixa o loading=false acontecer no finally ou timeout
+        } else if (msg.includes('does not exist') || msg.includes('42P01')) {
+           setFatalError("Banco de dados incompleto. Execute os scripts de correção SQL.");
+        } else {
+           // Erro genérico, loga mas permite acesso limitado
+           console.warn("Falha ao carregar perfil:", msg);
         }
-        
-        // Se for erro de coluna inexistente, sabemos que o script SQL não rodou corretamente
-        if (msg.includes('does not exist')) {
-           setFatalError("A coluna 'updated_at' não existe. Por favor, execute o script SQL de correção.");
-           setLoading(false);
-           return;
-        }
-        
-        // Se for outro erro, assumimos perfil null mas deixamos entrar
         setUserProfile(null);
       } else {
         setUserProfile(data || null);
+        setSlowLoading(false);
       }
     } catch (e) {
       console.error('Exceção ao buscar perfil:', e);
     } finally {
-      // Garante que o loading sempre termina se a query retornar
       setLoading(false);
       if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
     }
@@ -146,20 +142,74 @@ const App: React.FC = () => {
     window.location.href = window.location.origin + window.location.pathname;
   };
 
+  // Função de Reset Total para casos de travamento
+  const handleHardReset = () => {
+    if(confirm("Isso limpará todos os dados locais do navegador e reiniciará o app. Útil se o sistema estiver travado. Continuar?")) {
+      localStorage.clear();
+      sessionStorage.clear();
+      // Tenta limpar cookies específicos se possível ou apenas reload forçado
+      window.location.reload();
+    }
+  };
+
+  const handleSaveKey = () => {
+    try {
+      setManualApiConfig(manualKey.trim());
+    } catch (e: any) {
+      alert(e.message);
+    }
+  };
+
   const getDisplayName = () => {
     let rawName = userProfile?.full_name || session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'Colaborador';
     return rawName.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
   };
 
-  // TELA DE ERRO DE CONEXÃO
+  if (showDiagnosis) {
+    return <SystemDiagnosis onClose={() => setShowDiagnosis(false)} />;
+  }
+
+  // TELA DE ERRO DE CONEXÃO COM CAMPO DE CHAVE
   if (!connectionStatus.ok) {
     return (
       <div className="min-h-screen bg-red-50 flex items-center justify-center p-4">
-        <div className="bg-white p-8 rounded-xl shadow-2xl max-w-md text-center border border-red-100">
+        <div className="bg-white p-8 rounded-xl shadow-2xl max-w-md w-full text-center border border-red-100">
           <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">!</div>
-          <h2 className="text-red-600 font-bold text-xl mb-2">Erro de Conexão</h2>
-          <p className="text-slate-600 mb-4 text-sm">Não foi possível conectar ao banco de dados Supabase.</p>
-          <button onClick={() => window.location.reload()} className="w-full bg-red-600 text-white py-2 rounded-lg font-bold hover:bg-red-700 transition-colors">Tentar Novamente</button>
+          <h2 className="text-red-600 font-bold text-xl mb-2">Conexão Pendente</h2>
+          <p className="text-slate-600 mb-6 text-sm">
+             O sistema precisa da sua <strong>Chave Pública (Anon Key)</strong> do Supabase para conectar.
+          </p>
+
+          <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-left mb-6">
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Cole sua chave 'anon' aqui:</label>
+            <input 
+              type="text" 
+              value={manualKey}
+              onChange={(e) => setManualKey(e.target.value)}
+              placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI..."
+              className="w-full border border-slate-300 rounded p-2 text-xs font-mono mb-3 focus:ring-2 focus:ring-indigo-500 outline-none"
+            />
+            <button 
+              onClick={handleSaveKey}
+              disabled={!manualKey}
+              className="w-full bg-indigo-600 text-white py-2 rounded font-bold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+            >
+              Salvar e Conectar
+            </button>
+            <p className="text-[10px] text-slate-400 mt-2 text-center">
+              Você encontra esta chave no Painel Supabase {'>'} Settings {'>'} API.
+            </p>
+          </div>
+
+          <div className="space-y-3 pt-4 border-t border-slate-100">
+             <p className="text-xs text-red-400 break-all mb-2">Erro Técnico: {connectionStatus.message}</p>
+             <button onClick={() => window.location.reload()} className="text-sm text-slate-500 hover:text-slate-800 underline">Tentar Novamente (F5)</button>
+             <div className="pt-2">
+                <button onClick={() => setShowDiagnosis(true)} className="px-4 py-2 border border-slate-200 rounded text-xs font-bold text-slate-600 hover:bg-slate-50">
+                   🛠️ Diagnóstico Completo
+                </button>
+             </div>
+          </div>
         </div>
       </div>
     );
@@ -177,13 +227,14 @@ const App: React.FC = () => {
             {fatalError}
           </div>
           <p className="text-slate-400 mb-6">
-            Isso geralmente acontece quando as regras de segurança (RLS) entram em conflito ou o esquema está desatualizado.
-            <br/>
-            Por favor, copie o conteúdo do arquivo <strong>supabase_fix_lessons_rls.sql</strong> (incluído no projeto) e execute-o no SQL Editor do Supabase.
+            Por favor, copie o conteúdo do arquivo <strong>supabase_fix_final.sql</strong> e execute-o no SQL Editor do Supabase.
           </p>
           <div className="flex gap-4">
-             <button onClick={handleLogout} className="flex-1 bg-slate-700 text-white py-3 rounded-lg font-bold hover:bg-slate-600 transition-colors">
-               Fazer Logout e Tentar Novamente
+             <button onClick={() => window.location.reload()} className="flex-1 bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-500 transition-colors">
+               Já Executei, Tentar Novamente
+             </button>
+             <button onClick={handleHardReset} className="flex-1 bg-slate-700 text-white py-3 rounded-lg font-bold hover:bg-slate-600 transition-colors">
+               Resetar Cache Local
              </button>
           </div>
         </div>
@@ -203,10 +254,17 @@ const App: React.FC = () => {
           </div>
           <h2 className="text-xl font-bold text-slate-800 animate-pulse">Sincronizando LabEdu</h2>
         </div>
-        <div className="mt-16 bg-slate-50 p-6 rounded-2xl border border-slate-100 max-w-xs text-center shadow-sm">
-           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-4">Está demorando?</p>
-           <button onClick={handleLogout} style={{ cursor: 'pointer', pointerEvents: 'auto' }} className="w-full bg-white border border-slate-200 text-slate-600 py-3 px-4 rounded-xl text-xs font-bold hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition-all shadow-sm">
-             CANCELAR E FAZER LOGIN
+        
+        {/* Caixa de Ações de Demora */}
+        <div className="mt-16 bg-slate-50 p-6 rounded-2xl border border-slate-100 max-w-xs text-center shadow-sm space-y-3">
+           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-2">Está demorando?</p>
+           
+           <button onClick={() => setShowDiagnosis(true)} style={{ cursor: 'pointer', pointerEvents: 'auto' }} className="w-full bg-indigo-100 text-indigo-700 py-3 px-4 rounded-xl text-xs font-bold hover:bg-indigo-200 transition-all shadow-sm">
+             🔍 DIAGNOSTICAR PROBLEMA
+           </button>
+
+           <button onClick={handleHardReset} style={{ cursor: 'pointer', pointerEvents: 'auto' }} className="w-full bg-white border border-slate-200 text-red-600 py-3 px-4 rounded-xl text-xs font-bold hover:bg-red-50 hover:border-red-300 transition-all shadow-sm">
+             🗑️ REINICIAR SISTEMA (LIMPAR CACHE)
            </button>
         </div>
       </div>
@@ -219,7 +277,6 @@ const App: React.FC = () => {
     return <ChangePassword userId={session.user.id} onSuccess={() => fetchUserProfile(session.user.id)} />;
   }
 
-  // Handler para abrir o certificado
   const handleOpenCertificate = (data: any) => {
     setCertificateData({
       employeeName: getDisplayName(),
@@ -229,10 +286,12 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 flex relative animate-fade-in">
-      {/* Aviso de carregamento lento (Modo Fallback) */}
       {slowLoading && !userProfile && (
-        <div className="fixed top-0 left-0 right-0 bg-yellow-500 text-yellow-900 text-[10px] font-bold text-center py-1 z-[10000]">
-          ⚠️ Modo de Conexão Lenta: Alguns dados do perfil podem não ter carregado. Verifique o banco de dados.
+        <div className="fixed top-0 left-0 right-0 bg-orange-500 text-white text-xs font-bold text-center py-2 z-[10000] flex justify-center items-center gap-4 shadow-md">
+          <span>⚠️ Conexão Lenta ou Instável: O sistema forçou a entrada. Algumas funções podem falhar.</span>
+          <button onClick={handleHardReset} className="bg-white text-orange-600 px-3 py-1 rounded text-[10px] uppercase hover:bg-orange-50">
+            Resetar Conexão
+          </button>
         </div>
       )}
 
@@ -309,7 +368,6 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Renderização condicional do Certificado com dados dinâmicos */}
       {certificateData && (
         <Certificate 
           employeeName={certificateData.employeeName}

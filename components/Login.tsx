@@ -1,8 +1,8 @@
-
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { createClient } from '@supabase/supabase-js';
 import { getErrorMessage } from '../lib/errorUtils';
+import { SystemDiagnosis } from './SystemDiagnosis';
 
 // Service Role Key for emergency resets (Dev/Admin usage only)
 const SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh2d3locHNxdWFjcmZsZWlhYm55Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2Nzg5MTUzNCwiZXhwIjoyMDgzNDY3NTM0fQ.Fao_Av3TW-Nqa4yNJEiKLSopN-76tEK6_jT8mQPDDHU';
@@ -10,6 +10,7 @@ const SUPABASE_URL = 'https://xvwyhpsquacrfleiabny.supabase.co';
 
 export const Login: React.FC = () => {
   const [isSignUp, setIsSignUp] = useState(false); // Toggle between Login and Sign Up
+  const [showDiagnosis, setShowDiagnosis] = useState(false);
   
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -113,6 +114,10 @@ export const Login: React.FC = () => {
     }
   };
 
+  if (showDiagnosis) {
+    return <SystemDiagnosis onClose={() => setShowDiagnosis(false)} />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8 border border-slate-200">
@@ -204,13 +209,21 @@ export const Login: React.FC = () => {
         </div>
         
         {!isSignUp && (
-          <div className="mt-6 border-t border-slate-100 pt-4">
+          <div className="mt-6 border-t border-slate-100 pt-4 flex justify-between gap-2">
              <button 
                onClick={handleEmergencyReset}
                type="button"
-               className="w-full text-xs text-slate-400 hover:text-indigo-600 font-medium transition-colors flex items-center justify-center gap-1"
+               className="text-[10px] text-slate-400 hover:text-indigo-600 font-medium transition-colors"
              >
-               🛠️ Resetar Senha Admin (Dev Fix)
+               🛠️ Resetar Senha (Admin)
+             </button>
+             
+             <button 
+               onClick={() => setShowDiagnosis(true)}
+               type="button"
+               className="text-[10px] text-slate-400 hover:text-indigo-600 font-medium transition-colors"
+             >
+               🔍 Diagnosticar Erro
              </button>
           </div>
         )}

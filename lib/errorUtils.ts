@@ -32,6 +32,9 @@ export const getErrorMessage = (error: any): string => {
       if (candidate.includes('JWT') || candidate.includes('claims')) {
         return "Sessão expirada. Recarregue a página ou faça login novamente.";
       }
+      if (candidate.includes('recursion') || candidate.includes('infinite')) {
+        return "ERRO CRÍTICO (Recursão): O banco de dados entrou em loop. Execute o script 'supabase_fix_recursion.sql'.";
+      }
       return candidate;
     }
   }
@@ -40,6 +43,7 @@ export const getErrorMessage = (error: any): string => {
   if (error.code) {
     const postgresErrors: Record<string, string> = {
       '42501': 'Acesso Negado (RLS): Você não tem permissão para realizar esta operação.',
+      '42P17': 'ERRO CRÍTICO DE SISTEMA: Recursão infinita em permissões (RLS). Execute o script de correção.',
       '23505': 'Registro Duplicado: Já existe um item com estes dados.',
       'PGRST116': 'Registro não encontrado.',
       '42P01': 'Tabela não encontrada no banco de dados.',
